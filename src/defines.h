@@ -1,7 +1,7 @@
-/* Arduino SPIFlash Library v.3.0.0
+/* Arduino SPIFlash Library v.3.1.0
  * Copyright (C) 2017 by Prajwal Bhattaram
  * Created by Prajwal Bhattaram - 19/05/2015
- * Modified by Prajwal Bhattaram - 02/08/2017
+ * Modified by Prajwal Bhattaram - 24/02/2018
  *
  * This file is part of the Arduino SPIFlash Library. This library is for
  * Winbond NOR flash memory modules. In its current form it enables reading
@@ -28,65 +28,41 @@
 //						Common Instructions 						  //
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 
-#define	MANID        0x90
-#define PAGEPROG     0x02
-#define READDATA     0x03
-#define FASTREAD     0x0B
-#define WRITEDISABLE 0x04
-#define READSTAT1    0x05
-#define READSTAT2    0x35
-#define WRITESTATEN  0x50
-#define WRITESTAT    0x01
-#define WRITEENABLE  0x06
-#define SECTORERASE  0x20
-#define BLOCK32ERASE 0x52
-#define BLOCK64ERASE 0xD8
-#define CHIPERASE    0x60
-#define SUSPEND      0x75
-#define ID           0x90
-#define RESUME       0x7A
-#define JEDECID      0x9F
-#define POWERDOWN    0xB9
-#define RELEASE      0xAB
-#define READSFDP     0x5A
+#define	MANID         0x90
+#define PAGEPROG      0x02
+#define READDATA      0x03
+#define FASTREAD      0x0B
+#define WRITEDISABLE  0x04
+#define READSTAT1     0x05
+#define READSTAT2     0x35
+#define READSTAT3     0x15
+#define WRITESTATEN   0x50
+#define WRITESTAT1    0x01
+#define WRITESTAT2    0x31
+#define WRITESTAT3    0x11
+#define WRITEENABLE   0x06
+#define ADDR4BYTE_EN  0xB7
+#define ADDR4BYTE_DIS 0xE9
+#define SECTORERASE   0x20
+#define BLOCK32ERASE  0x52
+#define BLOCK64ERASE  0xD8
+#define CHIPERASE     0x60
+#define SUSPEND       0x75
+#define ID            0x90
+#define RESUME        0x7A
+#define JEDECID       0x9F
+#define POWERDOWN     0xB9
+#define RELEASE       0xAB
+#define READSFDP      0x5A
+#define UNIQUEID      0x4B
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 //                     General size definitions                       //
 //            B = Bytes; KiB = Kilo Bytes; MiB = Mega Bytes           //
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
-#ifndef B1
-  #define B1            1L * Bit
-#endif
-#define B2            2L * Bit
-#define B4            4L * Bit
-#define B8            8L * Bit
-#define B16           16L * Bit
-#define B32           32L * Bit
-#define B64           64L * Bit
-#define B80           80L * Bit
-#define B128          128L * Bit
-#define B256          256L * Bit
-#define B512          512L * Bit
-#define KB1           1L * KiB
-#define KB2           2L * KiB
-#define KB4           4L * KiB
-#define KB8           8L * KiB
-#define KB16          16L * KiB
-#define KB32          32L * KiB
-#define KB64          64L * KiB
-#define KB128         128L * KiB
-#define KB256         256L * KiB
-#define KB512         512L * KiB
-#define MB1           1L * MiB
-#define MB2           2L * MiB
-#define MB4           4L * MiB
-#define MB8           8L * MiB
-#define MB16          16L * MiB
-#define MB32          32L * MiB
-#define MB64          64L * MiB
-#define MB128         128L * MiB
-#define MB256         256L * MiB
-#define MB512         512L * MiB
+#define B(x)          uint32_t(x*BYTE)
+#define KB(x)         uint32_t(x*KiB)
+#define MB(x)         uint32_t(x*MiB)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 //					Chip specific instructions 						  //
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
@@ -125,6 +101,7 @@
 #define SUS           0x80
 #define WSE           0x04
 #define WSP           0x08
+#define ADS           0x01            // Current Address mode in Status register 3
 #define DUMMYBYTE     0xEE
 #define NULLBYTE      0x00
 #define NULLINT       0x0000
@@ -145,7 +122,7 @@
 #endif
 #define arrayLen(x)   (sizeof(x) / sizeof(*x))
 #define lengthOf(x)   (sizeof(x))/sizeof(byte)
-#define Bit           1L
+#define BYTE          1L
 #define KiB           1024L
 #define MiB           KiB * KiB
 #define S             1000L
@@ -203,10 +180,12 @@
  #define PREVWRITTEN          0x07
  #define LOWRAM               0x08
  #define SYSSUSPEND           0x09
- #define UNSUPPORTED          0x0A
- #define ERRORCHKFAIL         0x0B
- #define NORESPONSE           0x0C
- #define UNSUPPORTEDFUNCTION  0x0D
+ #define ERRORCHKFAIL         0x0A
+ #define NORESPONSE           0x0B
+ #define UNSUPPORTEDFUNC      0x0C
+ #define UNABLETO4BYTE        0x0D
+ #define UNABLETO3BYTE        0x0E
+ #define CHIPISPOWEREDDOWN    0x0F
  #define UNKNOWNERROR         0xFE
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
