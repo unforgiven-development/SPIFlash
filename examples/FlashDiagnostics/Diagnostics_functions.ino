@@ -2,14 +2,14 @@
   |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
   |                                                          FlashDiagnostic_functions.ino                                                        |
   |                                                               SPIFlash library                                                                |
-  |                                                                   v 3.0.0                                                                     |
+  |                                                                   v 3.1.0                                                                     |
   |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
   |                                                                    Marzogh                                                                    |
-  |                                                                  17.11.2017                                                                   |
+  |                                                                  04.03.2018                                                                   |
   |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
   |                                                                                                                                               |
   |                                  For a full diagnostics rundown - with error codes and details of the errors                                  |
-  |                                uncomment #define RUNDIAGNOSTIC in SPIFlash.cpp in the library before compiling                                |
+  |                                 uncomment #define RUNDIAGNOSTIC in SPIFlash.h in the library before compiling                                 |
   |                                             and loading this application onto your Arduino.                                                   |
   |                                                                                                                                               |
   |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
@@ -113,10 +113,6 @@ void getID() {
   b1 = (JEDEC >> 16);
   b2 = (JEDEC >> 8);
   //b3 = (JEDEC >> 0);
-
-
-  printLine();
-  //---------------------------------------------------------------------------------------------//
 
   clearprintBuffer(&printBuffer[1]);
   #if defined (ARDUINO_ARCH_ESP32)
@@ -492,6 +488,21 @@ void eraseSectorTest() {
     pass(FALSE);
   }
   Serial.println();
+}
+
+void eraseSectionTest() {
+    Serial.println();
+  uint32_t _time, _addr;
+  _addr = random(0, 0xFFFFF);
+  Serial.print(F("\t\t\tErase 72KB Section: "));
+  if (flash.eraseSection(_addr, KB(72))) {
+    _time = flash.functionRunTime();
+    pass(TRUE);
+    printTime(_time, 0);
+  }
+  else {
+    pass(FALSE);
+  }
 }
 
 void eraseBlock32KTest() {
