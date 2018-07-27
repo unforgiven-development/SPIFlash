@@ -1,13 +1,12 @@
-/* Arduino SPIFlash Library v.3.1.0
+/* Arduino SPIMemory Library v.3.3.0
  * Copyright (C) 2017 by Prajwal Bhattaram
  * Created by Prajwal Bhattaram - 19/05/2015
  * Modified by @boseji <salearj@hotmail.com> - 02/03/2017
- * Modified by Prajwal Bhattaram - 24/02/2018
+ * Modified by Prajwal Bhattaram - 19/06/2018
  *
- * This file is part of the Arduino SPIFlash Library. This library is for
- * Winbond NOR flash memory modules. In its current form it enables reading
- * and writing individual data variables, structs and arrays from and to various locations;
- * reading and writing pages; continuous read functions; sector, block and chip erase;
+ * This file is part of the Arduino SPIMemory Library. This library is for
+ * Flash and FRAM memory modules. In its current form it enables reading,
+ * writing and erasing data from and to various locations;
  * suspending and resuming programming/erase and powering down for low power operation.
  *
  * This Library is free software: you can redistribute it and/or modify
@@ -21,7 +20,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License v3.0
- * along with the Arduino SPIFlash Library.  If not, see
+ * along with the Arduino SPIMemory Library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
 
@@ -37,7 +36,7 @@ SPIFlash::SPIFlash(uint8_t cs) {
   pinMode(csPin, OUTPUT);
   CHIP_DESELECT
 }
-#elif defined (ARDUINO_ARCH_SAMD) || defined(ARCH_STM32)
+#elif defined (ARDUINO_ARCH_SAMD) || defined (ARCH_STM32)
 SPIFlash::SPIFlash(uint8_t cs, SPIClass *spiinterface) {
   _spi = spiinterface;  //Sets SPI interface - if no user selection is made, this defaults to SPI
   csPin = cs;
@@ -60,34 +59,12 @@ SPIFlash::SPIFlash(uint8_t cs) {
 }
 #endif
 
-
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 //     Public functions used for read, write and erase operations     //
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 
 //Identifies chip and establishes parameters
 bool SPIFlash::begin(uint32_t flashChipSize) {
-#ifdef PRINTNAMECHANGEALERT
-  if (!Serial) {
-    Serial.begin(115200);
-  }
-  for (uint8_t i = 0; i < 230; i++) {
-    Serial.print("-");
-  }
-  Serial.println();
-  Serial.println("\t\t\t\t\t\t\t\t\t\tImportant Notice");
-  for (uint8_t i = 0; i < 230; i++) {
-    Serial.print("-");
-  }
-  Serial.println();
-  Serial.println("\t\t\t\t\tThis version of the library - v3.1.0 will be the last version to ship under the name SPIFlash.");
-  Serial.println("\t\t\t\tStarting early May - when v3.2.0 is due - this library will be renamed 'SPIMemory' on the Arduino library manager.");
-  Serial.println("\t\t\t\t\t\t\tPlease refer to the Readme file for further details.");
-  for (uint8_t i = 0; i < 230; i++) {
-    Serial.print("-");
-  }
-  Serial.println();
-#endif
 #ifdef RUNDIAGNOSTIC
   Serial.println("Chip Diagnostics initiated.");
   Serial.println();
@@ -101,31 +78,10 @@ bool SPIFlash::begin(uint32_t flashChipSize) {
   //Define the settings to be used by the SPI bus
   _settings = SPISettings(SPI_CLK, MSBFIRST, SPI_MODE0);
 #endif
-// If no capacity is defined in user code
-  if (!flashChipSize) {
-    #ifdef RUNDIAGNOSTIC
-    Serial.println("No Chip size defined by user. Automated identification initiated.");
-    #endif
-    bool retVal = _chipID();
-    _endSPI();
-    return retVal;
-  }
-  else {
-    _getJedecId();
-    // If a custom chip size is defined
-    #ifdef RUNDIAGNOSTIC
-    Serial.println("Custom Chipsize defined");
-    #endif
-    _chip.capacity = flashChipSize;
-    _chip.supported = false;
-  }
+  bool retVal = _chipID(flashChipSize);
   _endSPI();
-
-  if (_chip.manufacturerID == CYPRESS_MANID) {
-    setClock(SPI_CLK/4);    // Cypress/Spansion chips appear to perform best at SPI_CLK/4
-  }
   chipPoweredDown = false;
-  return true;
+  return retVal;
 }
 
 //Allows the setting of a custom clock speed for the SPI bus to communicate with the chip.
@@ -138,11 +94,11 @@ void SPIFlash::setClock(uint32_t clockSpeed) {
 
 uint8_t SPIFlash::error(bool _verbosity) {
   if (!_verbosity) {
-    return errorcode;
+    return diagnostics.errorcode;
   }
   else {
-    _troubleshoot(errorcode, PRINTOVERRIDE);
-    return errorcode;
+    _troubleshoot(diagnostics.errorcode, PRINTOVERRIDE);
+    return diagnostics.errorcode;
   }
 }
 
@@ -153,7 +109,7 @@ uint32_t SPIFlash::getCapacity(void) {
 
 //Returns maximum number of pages
 uint32_t SPIFlash::getMaxPage(void) {
-	return (_chip.capacity / SPI_PAGESIZE);
+	return (_chip.capacity / _pageSize);
 }
 
 //Returns the time taken to run a function. Must be called immediately after a function is run as the variable returned is overwritten each time a function from this library is called. Primarily used in the diagnostics sketch included in the library to track function time.
@@ -174,6 +130,11 @@ bool SPIFlash::libver(uint8_t *b1, uint8_t *b2, uint8_t *b3) {
   return true;
 }
 
+//Checks to see if SFDP is present
+bool SPIFlash::sfdpPresent(void) {
+  return _chip.sfdpAvailable;
+}
+
 //Checks for and initiates the chip by requesting the Manufacturer ID which is returned as a 16 bit int
 uint16_t SPIFlash::getManID(void) {
 	uint8_t b1, b2;
@@ -185,7 +146,8 @@ uint16_t SPIFlash::getManID(void) {
 
 //Returns JEDEC ID which is returned as a 32 bit int
 uint32_t SPIFlash::getJEDECID(void) {
-    uint32_t id = _chip.manufacturerID;
+    uint32_t id = 0;
+    id = _chip.manufacturerID;
     id = (id << 8)|(_chip.memoryTypeID << 0);
     id = (id << 8)|(_chip.capacityID << 0);
     return id;
@@ -219,9 +181,8 @@ uint64_t SPIFlash::getUniqueID(void) {
 
 //Gets the next available address for use.
 // Takes the size of the data as an argument and returns a 32-bit address
-// All addresses in the in the sketch must be obtained via this function or not at all.
+// This function can be called anytime - even if there is preexisting data on the flash chip. It will simply find the next empty address block for the data.
 uint32_t SPIFlash::getAddress(uint16_t size) {
-  bool _loopedOver = false;
   if (!_addressCheck(currentAddress, size)){
     return false;
 	}
@@ -260,14 +221,8 @@ uint16_t SPIFlash::sizeofStr(String &inputStr) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 uint8_t SPIFlash::readByte(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   uint8_t data = 0;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -276,14 +231,8 @@ uint8_t SPIFlash::readByte(uint32_t _addr, bool fastRead) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 int8_t SPIFlash::readChar(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   int8_t data = 0;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -347,14 +296,8 @@ bool  SPIFlash::readCharArray(uint32_t _addr, char *data_buffer, size_t bufferSi
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 uint16_t SPIFlash::readWord(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   uint16_t data;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -363,14 +306,8 @@ uint16_t SPIFlash::readWord(uint32_t _addr, bool fastRead) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 int16_t SPIFlash::readShort(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   int16_t data;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -379,14 +316,8 @@ int16_t SPIFlash::readShort(uint32_t _addr, bool fastRead) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 uint32_t SPIFlash::readULong(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   uint32_t data;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -395,14 +326,8 @@ uint32_t SPIFlash::readULong(uint32_t _addr, bool fastRead) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 int32_t SPIFlash::readLong(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   int32_t data;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -411,14 +336,8 @@ int32_t SPIFlash::readLong(uint32_t _addr, bool fastRead) {
 //    1. _addr --> Any address from 0 to capacity
 //    2. fastRead --> defaults to false - executes _beginFastRead() if set to true
 float SPIFlash::readFloat(uint32_t _addr, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-  #endif
   float data;
   _read(_addr, data, sizeof(data), fastRead);
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros() - _spifuncruntime;
-  #endif
   return data;
 }
 
@@ -428,14 +347,7 @@ float SPIFlash::readFloat(uint32_t _addr, bool fastRead) {
 //    2. outputString --> String variable to write the output to
 //    3. fastRead --> defaults to false - executes _beginFastRead() if set to true
 bool SPIFlash::readStr(uint32_t _addr, String &data, bool fastRead) {
-  #ifdef RUNDIAGNOSTIC
-    _spifuncruntime = micros();
-    bool _retVal = _read(_addr, data, sizeof(data), fastRead);
-    _spifuncruntime = micros() - _spifuncruntime;
-    return _retVal;
-  #else
   return _read(_addr, data, sizeof(data), fastRead);
-  #endif
 }
 
 // Writes a byte of data to a specific location in a page.
@@ -446,7 +358,49 @@ bool SPIFlash::readStr(uint32_t _addr, String &data, bool fastRead) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeByte(uint32_t _addr, uint8_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _BYTE_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _BYTE_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  _nextByte(WRITE, data);
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    if (data != _nextByte(READ)) {
+      _endSPI();
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    else {
+      _endSPI();
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return true;
+    }
+  }
+  return true;
 }
 
 // Writes a char of data to a specific location in a page.
@@ -457,7 +411,49 @@ bool SPIFlash::writeByte(uint32_t _addr, uint8_t data, bool errorCheck) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeChar(uint32_t _addr, int8_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _CHAR_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _CHAR_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  _nextByte(WRITE, data);
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    if (data != (int8_t)_nextByte(READ)) {
+      _endSPI();
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    else {
+      _endSPI();
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return true;
+    }
+  }
+  return true;
 }
 
 // Writes an array of bytes starting from a specific location in a page.
@@ -498,6 +494,7 @@ bool SPIFlash::writeByteArray(uint32_t _addr, uint8_t *data_buffer, size_t buffe
       CHIP_SELECT
       _nextByte(WRITE, PAGEPROG);
       _transferAddress();
+      //_nextBuf(PAGEPROG, &data_buffer[data_offset], writeBufSz);
       for (uint16_t i = 0; i < writeBufSz; ++i) {
         _nextByte(WRITE, data_buffer[data_offset + i]);
       }
@@ -564,7 +561,7 @@ bool SPIFlash::writeCharArray(uint32_t _addr, char *data_buffer, size_t bufferSi
     CHIP_SELECT
     _nextByte(WRITE, PAGEPROG);
     _transferAddress();
-    //_nextBuf(PAGEPROG, (uint8_t*) &data_buffer[0], bufferSize);
+    //_nextBuf(PAGEPROG, &data_buffer[0], bufferSize);
     for (uint16_t i = 0; i < bufferSize; ++i) {
       _nextByte(WRITE, data_buffer[i]);
     }
@@ -614,7 +611,7 @@ bool SPIFlash::writeCharArray(uint32_t _addr, char *data_buffer, size_t bufferSi
     _nextByte(WRITE, READDATA);
     _transferAddress();
     for (uint16_t j = 0; j < bufferSize; j++) {
-      if (_nextByte(READ) != data_buffer[j]) {
+      if ((char)_nextByte(READ) != data_buffer[j]) {
         return false;
       }
     }
@@ -634,7 +631,54 @@ bool SPIFlash::writeCharArray(uint32_t _addr, char *data_buffer, size_t bufferSi
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeWord(uint32_t _addr, uint16_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _WORD_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _WORD_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  for (uint8_t i = 0; i < sizeof(data); i++) {
+    _nextByte(WRITE, data >> (8*i));
+  }
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    union {
+      uint8_t byte[2];
+      uint16_t word;
+    } dataIn;
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    for (uint8_t i = 0; i < sizeof(data); i++) {
+      dataIn.byte[i] = _nextByte(READ);
+    }
+    _endSPI();
+    if (dataIn.word != data) {
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+  }
+  return true;
 }
 
 // Writes a signed int as two bytes starting from a specific location in a page
@@ -645,7 +689,54 @@ bool SPIFlash::writeWord(uint32_t _addr, uint16_t data, bool errorCheck) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeShort(uint32_t _addr, int16_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _SHORT_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _SHORT_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  for (uint8_t i = 0; i < sizeof(data); i++) {
+    _nextByte(WRITE, data >> (8*i));
+  }
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    union {
+      uint8_t byte[2];
+      int16_t short_;
+    } dataIn;
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    for (uint8_t i = 0; i < sizeof(data); i++) {
+      dataIn.byte[i] = _nextByte(READ);
+    }
+    _endSPI();
+    if (dataIn.short_ != data) {
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+  }
+  return true;
 }
 
 // Writes an unsigned long as four bytes starting from a specific location in a page.
@@ -656,7 +747,54 @@ bool SPIFlash::writeShort(uint32_t _addr, int16_t data, bool errorCheck) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeULong(uint32_t _addr, uint32_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _ULONG_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _ULONG_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  for (uint8_t i = 0; i < sizeof(data); i++) {
+    _nextByte(WRITE, data >> (8*i));
+  }
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    union {
+      uint8_t byte[4];
+      uint32_t uLong;
+    } dataIn;
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    for (uint8_t i = 0; i < sizeof(data); i++) {
+      dataIn.byte[i] = _nextByte(READ);
+    }
+    _endSPI();
+    if (dataIn.uLong != data) {
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+  }
+  return true;
 }
 
 // Writes a signed long as four bytes starting from a specific location in a page
@@ -667,7 +805,54 @@ bool SPIFlash::writeULong(uint32_t _addr, uint32_t data, bool errorCheck) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeLong(uint32_t _addr, int32_t data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _LONG_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _LONG_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  _beginSPI(PAGEPROG);
+  for (uint8_t i = 0; i < sizeof(data); i++) {
+    _nextByte(WRITE, data >> (8*i));
+  }
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    union {
+      uint8_t byte[4];
+      int32_t Long;
+    } dataIn;
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    for (uint8_t i = 0; i < sizeof(data); i++) {
+      dataIn.byte[i] = _nextByte(READ);
+    }
+    _endSPI();
+    if (dataIn.Long != data) {
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+  }
+  return true;
 }
 
 // Writes a float as four bytes starting from a specific location in a page
@@ -678,7 +863,60 @@ bool SPIFlash::writeLong(uint32_t _addr, int32_t data, bool errorCheck) {
 // WARNING: You can only write to previously erased memory locations (see datasheet).
 // Use the eraseSector()/eraseBlock32K/eraseBlock64K commands to first clear memory (write 0xFFs)
 bool SPIFlash::writeFloat(uint32_t _addr, float data, bool errorCheck) {
-  return _write(_addr, data, sizeof(data), errorCheck, _FLOAT_);
+  //return _write(_addr, data, sizeof(data), errorCheck, _FLOAT_);
+  #ifdef RUNDIAGNOSTIC
+    _spifuncruntime = micros();
+  #endif
+  if(!_prep(PAGEPROG, _addr, sizeof(data))) {
+    return false;
+  }
+
+  union {
+    float Float;
+    uint8_t byte[sizeof(float)];
+  } dataOut;
+  dataOut.Float = data;
+
+  _beginSPI(PAGEPROG);
+  for (uint8_t i = 0; i < sizeof(data); i++) {
+    _nextByte(WRITE, dataOut.byte[i]);
+  }
+  CHIP_DESELECT
+
+  if (!errorCheck) {
+    _endSPI();
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+    return true;
+  }
+  else {
+    if (!_notBusy()) {
+      return false;
+    }
+    union {
+      uint8_t byte[4];
+      float Float;
+    } dataIn;
+    _currentAddress = _addr;
+    CHIP_SELECT
+    _nextByte(WRITE, READDATA);
+    _transferAddress();
+    for (uint8_t i = 0; i < sizeof(data); i++) {
+      dataIn.byte[i] = _nextByte(READ);
+    }
+    _endSPI();
+    if (dataIn.Float != data) {
+      #ifdef RUNDIAGNOSTIC
+        _spifuncruntime = micros() - _spifuncruntime;
+      #endif
+      return false;
+    }
+    #ifdef RUNDIAGNOSTIC
+      _spifuncruntime = micros() - _spifuncruntime;
+    #endif
+  }
+  return true;
 }
 
 // Writes a string to a specific location on a page
@@ -691,6 +929,8 @@ bool SPIFlash::writeFloat(uint32_t _addr, float data, bool errorCheck) {
 bool SPIFlash::writeStr(uint32_t _addr, String &data, bool errorCheck) {
   return _write(_addr, data, sizeof(data), errorCheck, _STRING_);
 }
+
+
 
 // Erases a number of sectors or blocks as needed by the data being input.
 //  Takes an address and the size of the data being input as the arguments and erases the block/s of memory containing the address.
@@ -726,17 +966,17 @@ bool SPIFlash::eraseSection(uint32_t _addr, uint32_t _sz) {
 
   if (KB64Blocks) {
     for (uint32_t i = 0; i < KB64Blocks; i++) {
-      _eraseFuncOrder[i] = BLOCK64ERASE;
+      _eraseFuncOrder[i] = kb64Erase.opcode;
     }
   }
   if (KB32Blocks) {
     for (uint32_t i = KB64Blocks; i < (KB64Blocks + KB32Blocks); i++) {
-      _eraseFuncOrder[i] = BLOCK32ERASE;
+      _eraseFuncOrder[i] = kb32Erase.opcode;
     }
   }
   if (KB4Blocks) {
     for (uint32_t i = (KB64Blocks + KB32Blocks); i < totalBlocks; i++) {
-      _eraseFuncOrder[i] = SECTORERASE;
+      _eraseFuncOrder[i] = kb4Erase.opcode;
     }
   }
 
@@ -758,22 +998,17 @@ bool SPIFlash::eraseSection(uint32_t _addr, uint32_t _sz) {
       //Serial.println(_eraseFuncOrder[j], HEX);
 
       uint16_t _timeFactor = 0;
-      switch (_eraseFuncOrder[j]) {
-        case BLOCK64ERASE:
-        _timeFactor = 1200;
-        break;
-
-        case BLOCK32ERASE:
-        _timeFactor = 1000;
-        break;
-
-        case SECTORERASE:
-        _timeFactor = 500;
-        break;
-
+      if (_eraseFuncOrder[j] == kb64Erase.opcode) {
+        _timeFactor = kb64Erase.time;
+      }
+      if (_eraseFuncOrder[j] == kb32Erase.opcode) {
+        _timeFactor = kb32Erase.time;
+      }
+      if (_eraseFuncOrder[j] == kb4Erase.opcode) {
+        _timeFactor = kb4Erase.time;
       }
       if(!_notBusy(_timeFactor * 1000L)) {
-        return false;	//Datasheet says erasing a sector takes 400ms max
+        return false;
       }
       if (j == noOfEraseRunsB4Boundary) {
         if (!_prep(ERASEFUNC, (_addr + (_sz - _addressOverflow)), _sz)) {
@@ -794,16 +1029,20 @@ bool SPIFlash::eraseSection(uint32_t _addr, uint32_t _sz) {
 // Erases one 4k sector.
 //  Takes an address as the argument and erases the block containing the address.
 bool SPIFlash::eraseSector(uint32_t _addr) {
+  if (!kb4Erase.supported) {
+    _troubleshoot(UNSUPPORTEDFUNC);
+    return false;
+  }
   #ifdef RUNDIAGNOSTIC
     _spifuncruntime = micros();
   #endif
   if (!_prep(ERASEFUNC, _addr, KB(4))) {
     return false;
   }
-  _beginSPI(SECTORERASE);   //The address is transferred as a part of this function
+  _beginSPI(kb4Erase.opcode);   //The address is transferred as a part of this function
   _endSPI();
 
-  if(!_notBusy(500 * 1000L)) {
+  if(!_notBusy(kb4Erase.time)) {
     return false;	//Datasheet says erasing a sector takes 400ms max
   }
   //_writeDisable();
@@ -817,16 +1056,20 @@ bool SPIFlash::eraseSector(uint32_t _addr) {
 // Erases one 32k block.
 //  Takes an address as the argument and erases the block containing the address.
 bool SPIFlash::eraseBlock32K(uint32_t _addr) {
+  if (!kb32Erase.supported) {
+    _troubleshoot(UNSUPPORTEDFUNC);
+    return false;
+  }
   #ifdef RUNDIAGNOSTIC
     _spifuncruntime = micros();
   #endif
   if (!_prep(ERASEFUNC, _addr, KB(32))) {
     return false;
   }
-  _beginSPI(BLOCK32ERASE);
+  _beginSPI(kb32Erase.opcode);
   _endSPI();
 
-  if(!_notBusy(1000 * 1000L)) {
+  if(!_notBusy(kb32Erase.time)) {
     return false;	//Datasheet says erasing a sector takes 400ms max
   }
   _writeDisable();
@@ -840,6 +1083,10 @@ bool SPIFlash::eraseBlock32K(uint32_t _addr) {
 // Erases one 64k block.
 //  Takes an address as the argument and erases the block containing the address.
 bool SPIFlash::eraseBlock64K(uint32_t _addr) {
+  if (!kb64Erase.supported) {
+    _troubleshoot(UNSUPPORTEDFUNC);
+    return false;
+  }
   #ifdef RUNDIAGNOSTIC
     _spifuncruntime = micros();
   #endif
@@ -847,10 +1094,10 @@ bool SPIFlash::eraseBlock64K(uint32_t _addr) {
     return false;
   }
 
-  _beginSPI(BLOCK64ERASE);
+  _beginSPI(kb64Erase.opcode);
   _endSPI();
 
-  if(!_notBusy(1200 * 1000L)) {
+  if(!_notBusy(kb64Erase.time)) {
     return false;	//Datasheet says erasing a sector takes 400ms max
   }
   #ifdef RUNDIAGNOSTIC
@@ -868,7 +1115,7 @@ bool SPIFlash::eraseChip(void) {
     return false;
   }
 
-	_beginSPI(CHIPERASE);
+	_beginSPI(chipErase.opcode);
   _endSPI();
 
 	while(_readStat1() & BUSY) {

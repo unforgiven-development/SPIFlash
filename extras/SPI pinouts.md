@@ -20,7 +20,6 @@
 * |   GPIO2    |  CS / SS       |
 * |____________|________________|
 *
-*
 * ESP32 Feather SPI pinout is as follows:
 *  _______________________________________
 * |Pin Name |   GPIO #   |  HSPI Function |

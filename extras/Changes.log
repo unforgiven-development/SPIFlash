@@ -1,6 +1,81 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
-//										  SPIFlash Library 				 						   //
+//										  SPIMemory Library 				 						   //
 //					  				  		Changes log 									   	   //
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+//				 	 						Version 3.3.0 									   	   //
+//									Author: Prajwal Bhattaram									   //
+//					  						13.04.2018											   //
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+Library now supports FRAM memory. Refer to the RAM section of the ReadMe file for more information
+
+Bugs squashed:
+--> Fixed a major bug in how SFDP data is used to calculate chip capacity. The previous version of the library returned a wrong value. This has now been fixed. Refer to comments in _getSFDPFlashParam(void) for further details.
+--> Fixes bug that causes ballooning of pagesize when SFDP is not read. This is because no default _pageSize value was set in this scenario. This has now been fixed.
+
+Enhancements:
+--> Now supports FRAM memory chips via the `SPIFram` constructor
+--> Changed Diagnostics output in _chipID() to match situation better.
+--> Fixed _chipID() to run more efficiently.
+
+New flash memory chips supported:
+--> GD25Q16C from Giga devices (Used on the Adafruit ItsyBitsy M0 Express)
+--> W25Q64JV from Winbond
+
+New FRAM memory chips supported:
+--> FM25W256 from Cypress
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+//				 	 						Version 3.2.1 									   	   //
+//									Author: Prajwal Bhattaram									   //
+//					  						13.04.2018											   //
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+
+Bugs squashed
+--> Fixes issue #135 : The addition of the SFDP checking to _chipID resulted in a sudden (very large) increase in compiled code size. As of the current version (v3.2.1), SFDP checking is an user controlled option. To get the library to work with SFDP compatible flash memory that is not officially supported, the user must uncomment '//#define USES_SFDP' in 'SPIMemory.h'.
+
+--> Moved `bool _loopedOver` from being a local variable in `getAddress()` to a global one. Now it actually does what it was meant to do - i.e. prevent looping over data a second time.
+
+Enhancements
+--> The way the basic functions execute has been modified to keep the function runtime the same (or improved) while reducing their memory footprint.
+
+		Test sketch - FlashDiagnostics.ino from v3.2.0 with #RUNDIAGNOSTIC commented out
+		Test platform - Arduino Pro Mini 8MHz 3.3V
+		Library version: v3.1.0			Compiled code size - 17652 bytes (SFDP discovery not supported)
+		Library version: v3.2.0			Compiled code size - 20104 bytes (SFDP discovery supported & on by default) (13.9% larger than v3.1.0)
+		Library version: v3.2.1			Compiled code size - 15316 bytes (SFDP discovery turned off) (13.75% smaller than v3.1.0)
+		Library version: v3.2.1			Compiled code size - 17854 bytes (SFDP discovery turned on) (1.1% larger than v3.1.0)
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+//				 	 						Version 3.2.0 									   	   //
+//									Author: Prajwal Bhattaram									   //
+//					  						13.04.2018											   //
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+--> Library name changed to SPIMemory
+
+--> The library now gathers sfdp information through _chipID(). SFDP information is collected when available, otherwise the library defaults to the pre v3.2.0 version.
+
+New flash memory chips supported
+--> All flash memories compatible with the SFDP standard (as at JESD216B) should be compatible with the library
+
+--> LE25U40CMC from ON Semiconductor
+--> A25L512A0 from AMIC
+--> M25P40 from Micron
+--> AT25SF041 from Adesto
+--> S25FL032P from Cypress/Spansion
+
+New Microcontrollers supported
+--> ATSAMD51J19 ARM Cortex M4 (Adafruit Metro M4)
+
+Bugs squashed
+
+Enhancements
+The library now does the following - if the flash memory chip is compatible with the SFDP standard:
+--> Identifies the flash memory chip using the Serial Flash Discoverable Parameters standard. (JESD216B)
+--> Identifies the following opcodes from the SFDP tables and uses them to read/write data:
+			- eraseSector, eraseBlock32K, eraseBlock64K
+--> Reads timing information from SFDP to accurately time the following operations:
+			- eraseSector, eraseBlock32K, eraseBlock64K
+- Fixes #125 in commit 10c2b86. The library automatically uses the alternate chip erase code (0xC7) as required (only on fully supported chips)
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
 //				 	 						Version 3.1.0 									   	   //
 //									Author: Prajwal Bhattaram									   //
